@@ -1,0 +1,50 @@
+# Garry's Mod dedicated server: srcds from steamcmd app 4020 (anonymous login, about 7 GB), configured through
+# cfg/server.cfg. srcds_linux is 32-bit; `ldd` on it, the engine's *_srv.so files and garrysmod/bin/*_srv.so finds
+# everything in the base image (lib32gcc-s1, lib32stdc++6, the i386 libc), and a running srcds maps nothing else, so
+# no `packages` are needed. srcds_run warns "Failed to load 32-bit libtinfo.so.5 or libncurses.so.5": that only
+# disables readline line editing (Debian trixie has no 32-bit libtinfo5); the panel console writes to stdin and works.
+id: garrys-mod
+name: "Garry's Mod"
+image: ionnet-gss-base
+
+variables:
+  - { key: hostname, label: Server name, description: "Shown in the server browser.", type: string, default: "A Garry's Mod Server" }
+  - { key: map, label: Map, type: string, default: gm_construct, pattern: '[A-Za-z0-9_]{1,64}' }
+  - { key: slots, label: Player slots, type: number, default: 16, min: 2, max: 128 }
+  - { key: gamemode, label: Gamemode, description: "The folder name of the gamemode, e.g. sandbox, darkrp or terrortown.", type: string, default: sandbox, pattern: '[a-z0-9_]{1,32}' }
+  - { key: workshop_collection, label: Workshop collection id, description: "The numeric id of a Steam Workshop collection to download at start. Needs a Steam API key. Empty = none.", type: string, default: "", pattern: '[0-9]{0,20}' }
+  - { key: steam_api_key, label: Steam API key, description: "Only needed for a Workshop collection (steamcommunity.com/dev/apikey).", type: secret }
+  - { key: password, label: Join password, description: "Empty = open to everyone.", type: string, default: "" }
+  - { key: rcon_password, label: RCON password, description: "Generated once. The panel console doesn't need it.", type: secret, generate: 24 }
+  - { key: memory, label: Memory, type: number, unit: MB, default: 2048, min: 1024, max: 65536, bind: limits.memory }
+  - { key: disk, label: Disk, description: "The game itself takes about 5 GB.", type: number, unit: MB, default: 15360, min: 8192, max: 204800, bind: limits.disk }
+
+ports:
+  - { name: game, proto: udp, default: 27015 }
+
+install:
+  - steamcmd: { app: 4020, validate: true }
+
+# srcds reads server.cfg at start, so these keys follow the panel's settings; every other line stays the owner's.
+configs:
+  - file: garrysmod/cfg/server.cfg
+    format: cfg
+    set:
+      hostname: "{{vars.hostname}}"
+      sv_password: "{{vars.password}}"
+      rcon_password: "{{vars.rcon_password}}"
+      sv_lan: "0"
+
+# Every user-written value goes through |sh. The Workshop collection and the API key are only passed when set: the
+# shell variables are empty otherwise and ${VAR:+…} then expands to nothing. srcds_run's own restart loop is off
+# (-norestart) so gss-init decides about restarts.
+start: >
+  WORKSHOP={{vars.workshop_collection|sh}} AUTHKEY={{vars.steam_api_key|sh}};
+  exec ./srcds_run -game garrysmod -console -norestart -port {{ports.game}}
+  +maxplayers {{vars.slots}} +map {{vars.map|sh}} +gamemode {{vars.gamemode|sh}}
+  ${WORKSHOP:++host_workshop_collection "$WORKSHOP"} ${AUTHKEY:+-authkey "$AUTHKEY"}
+# Printed once the map is loaded and the server logged in to Steam (anonymously): it answers A2S queries from then on.
+# "Could not establish connection to Steam servers" is srcds's message when the login fails (the server still runs).
+ready: { log: 'Connection to Steam servers successful|VAC secure mode is activated|Could not establish connection to Steam servers' }
+stop: { command: quit, timeout: 30 }
+console: { input: stdin }

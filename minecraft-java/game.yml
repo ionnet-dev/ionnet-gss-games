@@ -1,0 +1,89 @@
+# Minecraft: Java Edition (vanilla or Paper). The install hook resolves "latest" and verifies the jar's checksum.
+id: minecraft-java
+name: "Minecraft: Java Edition"
+image: ionnet-gss-minecraft-server:java{{vars.java}}
+
+variables:
+  - key: flavour
+    label: Server software
+    type: select
+    options: [vanilla, paper]
+    default: paper
+    reinstall: true
+  - key: version
+    label: Minecraft version
+    description: A release, or "latest" for the newest one. The list comes from Mojang; if it can't be loaded, type a release like 1.21.4.
+    type: select
+    options: [latest]
+    options_from:
+      url: https://piston-meta.mojang.com/mc/game/version_manifest_v2.json
+      items: versions
+      value: id
+      where: { type: release }
+      limit: 150
+    pattern: '[0-9]+\.[0-9]+(\.[0-9]+)?'
+    default: latest
+    reinstall: true
+  - key: java
+    label: Java
+    type: select
+    description: The newest releases need Java 25, 1.20.5 to 1.21.x need 21, older ones 17 or 8.
+    options: ["8", "17", "21", "25"]
+    default: "25"
+    reinstall: false
+  - key: memory
+    label: Memory
+    type: number
+    description: The container's memory limit. The Java heap gets 75% of it; the rest is the JVM's own overhead.
+    unit: MB
+    default: 2048
+    min: 1536 # At 1024 MB Paper's first start (jar patching) is OOM-killed: 768 MB heap plus JVM overhead.
+    max: 65536
+    bind: limits.memory
+  - key: motd
+    label: Message of the day
+    type: string
+    default: A Minecraft Server
+  - key: rcon_password
+    label: RCON password
+    description: Generated once. RCON is only reachable inside the server's own network.
+    type: secret
+    generate: 24
+
+ports:
+  - { name: game, proto: tcp, default: 25565 }
+  - { name: rcon, proto: tcp, default: 25575, internal: true }
+
+install:
+  - hook: hooks/install.sh
+  - write: { file: eula.txt, content: "eula=true\n" }
+
+configs:
+  - file: server.properties
+    format: properties
+    set:
+      server-port: "{{ports.game}}"
+      motd: "{{vars.motd}}"
+      enable-rcon: "true"
+      rcon.port: "{{ports.rcon}}"
+      rcon.password: "{{vars.rcon_password}}"
+
+# The heap is sized from the container's memory limit, which the JVM reads from the cgroup: at most 75%, so
+# metaspace, threads and direct buffers fit in the rest instead of getting the container OOM-killed under load.
+# Every Java line from 8u191 on knows these flags; Java 8 needs the decimal point.
+# terminal.jline=false stops Paper's line editor from echoing typed commands back into the console.
+start: java -XX:InitialRAMPercentage=25.0 -XX:MaxRAMPercentage=75.0 -Dterminal.jline=false -Dterminal.ansi=true -jar server.jar nogui
+ready: { log: 'Done \(\d' }
+stop: { command: stop, timeout: 60 }
+
+console: { input: stdin }
+players:
+  # Anchored at the line start (only the log prefix may come before the name) and at the line end, so chat and
+  # /say lines can't fake a join. Matches vanilla "[12:00:00] [Server thread/INFO]: ", Paper "[12:00:00 INFO]: " and recent Paper, which logs "System chat: Steve joined the game".
+  join: '^(?:\[[^\]]*\] )*\[[^\]]*INFO\]: (?:System chat: )?(\w+) joined the game\s*$'
+  leave: '^(?:\[[^\]]*\] )*\[[^\]]*INFO\]: (?:System chat: )?(\w+) left the game\s*$'
+
+backup:
+  before: [save-off, save-all flush]
+  after: [save-on]
+  exclude: [logs/, cache/]

@@ -1,0 +1,37 @@
+# Garry's Mod with a MariaDB beside it, for MySQLOO addons. Everything else comes from garrys-mod (`extends`).
+# The game reaches the database as host "db" on the server's own network (never published). The connection details
+# are rendered into garrysmod/data/gss_database.json when the server is provisioned; an addon reads them with
+# file.Read("gss_database.json", "DATA") and passes them to mysqloo.connect (the MySQLOO module itself is the
+# addon's to install under garrysmod/lua/bin).
+# TLS: the stock mariadb image (11.4+) turns TLS on with a self-signed certificate it generates at start, and recent
+# MariaDB clients verify the server certificate by default. MariaDB 11.4+ clients can check this one through the
+# password (zero-configuration TLS; the 11.8 client in the game container connects with verification on), but older
+# clients and other connectors (libmysqlclient, many MySQLOO builds) can't and refuse to connect. The file says so:
+# `"ssl": true, "sslVerifyServerCert": false` (encrypted, certificate not checked; with the mariadb CLI that is
+# `--ssl-verify-server-cert=0`). The traffic never leaves the server's own network.
+id: garrys-mod-mysql
+name: "Garry's Mod + MySQL"
+extends: garrys-mod
+# The mariadb command-line client in the game container (a derived image, built once per host), for hooks that set
+# up or check the database: mariadb -h db -u gmod -p"$GSS_VAR_DB_PASSWORD" --ssl-verify-server-cert=0 gmod
+packages: [mariadb-client]
+
+variables:
+  - { key: db_password, label: Database password, description: Generated once., type: secret, generate: 24 }
+
+services:
+  db:
+    image: mariadb:11.4
+    env:
+      MARIADB_DATABASE: gmod
+      MARIADB_USER: gmod
+      MARIADB_PASSWORD: "{{vars.db_password}}"
+      MARIADB_RANDOM_ROOT_PASSWORD: "1"
+    volume: /var/lib/mysql
+    healthcheck: { command: "healthcheck.sh --connect --innodb_initialized", interval: 5, retries: 30, startTimeout: 120 }
+    limits: { memoryMb: 512, cpuMillis: 500 }
+
+configs:
+  - file: garrysmod/data/gss_database.json
+    format: template
+    template: templates/gss_database.json

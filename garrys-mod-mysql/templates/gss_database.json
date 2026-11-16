@@ -1,0 +1,9 @@
+{
+  "host": "db",
+  "port": 3306,
+  "database": "gmod",
+  "user": "gmod",
+  "password": {{vars.db_password|json}},
+  "ssl": true,
+  "sslVerifyServerCert": false
+}
