@@ -2,8 +2,10 @@
 # Install hook for minecraft-java. Runs as uid 1000 in /data.
 # In: GSS_VAR_FLAVOUR (vanilla|paper|forge|neoforge), GSS_VAR_VERSION (e.g. 1.21.4 or "latest"),
 #     GSS_VAR_FORGE_VERSION / GSS_VAR_NEOFORGE_VERSION (a build from the panel's list, or "recommended").
-# Out: the server in the current folder, every download verified against the upstream checksum, and gss-launch.args:
-#      the arguments `start` passes to java after the memory flags ("-jar server.jar", or Forge's argument file).
+# Out: the server in the current folder, every download verified against the upstream checksum, gss-launch.args:
+#      the arguments `start` passes to java after the memory flags ("-jar server.jar", or Forge's argument file), and
+#      gss-version: the Minecraft version actually installed (never "latest"), which the panel's Game settings tab
+#      matches its fields against.
 #   vanilla:  piston-meta version manifest → version JSON → downloads.server (url + sha1) → server.jar
 #   paper:    fill.papermc.io v3 → latest build of the version → downloads."server:default" (url + sha256) → server.jar
 #   forge:    promotions_slim.json ("recommended") → maven.minecraftforge.net installer (+ .sha256) → --installServer
@@ -24,6 +26,8 @@ NEOFORGE_MAVEN="${GSS_NEOFORGE_MAVEN_URL:-https://maven.neoforged.net/releases}"
 NEOFORGE_API="${GSS_NEOFORGE_API_URL:-https://maven.neoforged.net/api/maven/versions/releases}"
 JAR="server.jar"
 LAUNCH="gss-launch.args"
+VERSION_FILE="gss-version"
+MINECRAFT=""
 INSTALLER="gss-installer.jar"
 
 die() {
@@ -72,6 +76,13 @@ write_launch() {
   printf '%s\n' "$*" > "$LAUNCH"
 }
 
+# Record the Minecraft version in $MINECRAFT, which every install function sets once it knows the final one.
+write_version() {
+  [ -n "$MINECRAFT" ] || die "The install finished without knowing the Minecraft version."
+  printf '%s\n' "$MINECRAFT" > "$VERSION_FILE"
+  echo "Minecraft version $MINECRAFT."
+}
+
 # The Minecraft version to install: $VERSION, with "latest" looked up.
 resolve_minecraft() {
   if [ "$VERSION" = "latest" ]; then
@@ -110,6 +121,7 @@ install_vanilla() {
   [ -n "$jar_url" ] && [ -n "$sha1" ] || die "Minecraft $version has no server download (very old versions don't)."
   echo "Downloading vanilla $version server jar..."
   download "$jar_url" sha1sum "$sha1"
+  MINECRAFT="$version"
 }
 
 install_paper() {
@@ -133,6 +145,7 @@ install_paper() {
   [ -n "$name" ] && [ -n "$sha256" ] && [ -n "$jar_url" ] || die "Paper's answer for $version has no server download."
   echo "Downloading $name..."
   download "$jar_url" sha256sum "$sha256"
+  MINECRAFT="$version"
 }
 
 # Download the installer at $1 (checked against its .sha256 file), run it with --installServer, and point
@@ -209,6 +222,30 @@ install_forge() {
     fi
   fi
   run_installer "$FORGE_MAVEN/net/minecraftforge/forge/$full/forge-$full-installer.jar" "$full" "Forge" "net/minecraftforge/forge"
+  # Every Forge version starts with its Minecraft version (1.21.4-54.1.0, 1.7.10-10.13.4.1614-1.7.10).
+  MINECRAFT="${full%%-*}"
+}
+
+# The Minecraft version a NeoForge version $1 is for: the inverse of neoforge_prefix. 21.1.5 → 1.21.1, 21.0.5 → 1.21,
+# 26.1.0.5 → 26.1, 26.1.2.5 → 26.1.2, 1.20.1-47.1.106 → 1.20.1; suffixes (-beta, +build) don't count.
+neoforge_minecraft() {
+  case "$1" in
+    1.20.1-*) printf '1.20.1' ;;
+    *)
+      parts="$(printf '%s' "$1" | sed 's/[-+].*//')"
+      first="$(printf '%s' "$parts" | cut -d . -f 1)"
+      second="$(printf '%s' "$parts" | cut -d . -f 2)"
+      third="$(printf '%s' "$parts" | cut -d . -f 3)"
+      if [ "$(printf '%s' "$parts" | tr -cd . | wc -c)" -ge 3 ]; then
+        # 26.1.0.5: year, drop, hotfix, build.
+        if [ "$third" = "0" ]; then printf '%s.%s' "$first" "$second"; else printf '%s.%s.%s' "$first" "$second" "$third"; fi
+      elif [ "$second" = "0" ]; then
+        printf '1.%s' "$first"
+      else
+        printf '1.%s.%s' "$first" "$second"
+      fi
+      ;;
+  esac
 }
 
 # The start of the NeoForge versions for Minecraft $1: 1.21.1 → "21.1.", 1.21 → "21.0.", 26.1 → "26.1.0.",
@@ -265,6 +302,7 @@ install_neoforge() {
     fi
   fi
   run_installer "$NEOFORGE_MAVEN/net/neoforged/$artifact/$full/$artifact-$full-installer.jar" "$full" "NeoForge" "net/neoforged/$artifact"
+  MINECRAFT="$(neoforge_minecraft "$full")"
 }
 
 case "$FLAVOUR" in
@@ -277,3 +315,4 @@ esac
 if [ "$FLAVOUR" = "vanilla" ] || [ "$FLAVOUR" = "paper" ]; then
   write_launch "-jar $JAR"
 fi
+write_version

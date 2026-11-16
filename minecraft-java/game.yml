@@ -104,6 +104,237 @@ configs:
       rcon.port: "{{ports.rcon}}"
       rcon.password: "{{vars.rcon_password}}"
 
+# The Game settings tab: the panel reads server.properties through the file API, shows the fields that apply to the
+# server's Minecraft version (since is inclusive, until exclusive) and writes back only the keys the owner changed.
+# gss-version is written by the install hook (the concrete version, not "latest"); until it exists the version
+# variable decides. Keys configs.set manages above (server-port, motd, rcon) and keys that make no sense inside the
+# container (server-ip, the query, management-server and JMX ports, which aren't published) are left out, and `hide`
+# keeps them out of the "Other" group too (the management server's secret would show in plain text). A key that
+# changed its format over time appears twice with disjoint version ranges. Version limits come from the Minecraft
+# Wiki's server.properties history; a key without one has no documented start.
+settings:
+  version: "{{vars.version}}"
+  version_file: gss-version
+  files:
+    - file: server.properties
+      format: properties
+      label: Server properties
+      others: true
+      hide: [server-ip, enable-query, query.port, enable-jmx-monitoring, status-heartbeat-interval,
+        management-server-enabled, management-server-host, management-server-port, management-server-secret,
+        management-server-allowed-origins, management-server-tls-enabled, management-server-tls-keystore,
+        management-server-tls-keystore-password, text-filtering-config, text-filtering-version]
+      groups:
+        - name: Gameplay
+          fields:
+            # Before 1.14 the file only knew numbers; since then names (numbers are still converted).
+            - key: difficulty
+              label: Difficulty
+              description: How hard mobs hit and how hunger and poison affect players.
+              type: select
+              options: ["0", "1", "2", "3"]
+              labels: { "0": Peaceful, "1": Easy, "2": Normal, "3": Hard }
+              default: "1"
+              until: "1.14"
+            - key: difficulty
+              label: Difficulty
+              description: How hard mobs hit and how hunger and poison affect players.
+              type: select
+              options: [peaceful, easy, normal, hard]
+              labels: { peaceful: Peaceful, easy: Easy, normal: Normal, hard: Hard }
+              default: easy
+              since: "1.14"
+            - key: gamemode
+              label: Default game mode
+              description: The game mode new players start in.
+              type: select
+              options: ["0", "1", "2", "3"]
+              labels: { "0": Survival, "1": Creative, "2": Adventure, "3": Spectator }
+              default: "0"
+              until: "1.14"
+            - key: gamemode
+              label: Default game mode
+              description: The game mode new players start in.
+              type: select
+              options: [survival, creative, adventure, spectator]
+              labels: { survival: Survival, creative: Creative, adventure: Adventure, spectator: Spectator }
+              default: survival
+              since: "1.14"
+            - { key: force-gamemode, label: Force game mode, type: boolean, default: false,
+                description: "Switch players to the default game mode every time they join." }
+            - { key: hardcore, label: Hardcore, type: boolean, default: false,
+                description: "Create new worlds in hardcore mode: one life, and the difficulty is locked to hard." }
+            - { key: pvp, label: Player versus player, type: boolean, default: true, until: "1.21.9",
+                description: "Let players damage each other." }
+            - { key: allow-nether, label: Allow the Nether, type: boolean, default: true, until: "1.21.9",
+                description: "Let players enter the Nether through portals." }
+            - { key: spawn-monsters, label: Spawn monsters, type: boolean, default: true, until: "1.21.9",
+                description: "Let hostile mobs spawn." }
+            - { key: spawn-animals, label: Spawn animals, type: boolean, default: true, until: "1.21.2",
+                description: "Let animals spawn." }
+            - { key: spawn-npcs, label: Spawn villagers, type: boolean, default: true, until: "1.21.2",
+                description: "Let villagers spawn." }
+            - { key: enable-command-block, label: Command blocks, type: boolean, default: false, until: "1.21.9",
+                description: "Let command blocks run commands." }
+            - { key: spawn-protection, label: Spawn protection radius, type: number, integer: true, min: 0, default: 16,
+                unit: blocks, description: "Only operators can build within this distance of the world spawn; 0 turns it off." }
+            - { key: allow-flight, label: Allow flight, type: boolean, default: false,
+                description: "Don't kick survival players for flying, which flight mods need." }
+            - { key: announce-player-achievements, label: Announce achievements, type: boolean, default: true,
+                until: "1.12", description: "Show achievements in chat." }
+            - { key: op-permission-level, label: Operator permission level, type: number, integer: true, min: 0, max: 4,
+                default: 4, description: "The permission level /op gives new operators." }
+            - { key: function-permission-level, label: Function permission level, type: number, integer: true,
+                min: 1, max: 4, default: 2, since: "1.14.4",
+                description: "The permission level data pack functions run with." }
+
+        - name: World
+          fields:
+            - { key: level-name, label: World folder, type: string, default: world,
+                description: "The world's folder name below the server folder; a missing folder is generated as a new world." }
+            - { key: level-seed, label: Seed, type: string, default: "",
+                description: "The seed for a newly generated world; empty picks a random one." }
+            # From 1.19 the key holds a world preset id (minecraft: may be left out); before, fixed upper-case names.
+            - key: level-type
+              label: World type
+              description: The preset a new world is generated with.
+              type: select
+              options: [DEFAULT, FLAT, LARGEBIOMES, AMPLIFIED]
+              labels: { DEFAULT: Default, FLAT: Superflat, LARGEBIOMES: Large biomes, AMPLIFIED: Amplified }
+              default: DEFAULT
+              until: "1.16"
+            # 1.16 rewrote world generation settings: the file holds lowercase names until the 1.19 registry ids.
+            - key: level-type
+              label: World type
+              description: The preset a new world is generated with.
+              type: select
+              options: [default, flat, largebiomes, amplified]
+              labels: { default: Default, flat: Superflat, largebiomes: Large biomes, amplified: Amplified }
+              default: default
+              since: "1.16"
+              until: "1.19"
+            - key: level-type
+              label: World type
+              description: The preset a new world is generated with.
+              type: select
+              options: ["minecraft:normal", "minecraft:flat", "minecraft:large_biomes", "minecraft:amplified", "minecraft:single_biome_surface"]
+              labels:
+                "minecraft:normal": Default
+                "minecraft:flat": Superflat
+                "minecraft:large_biomes": Large biomes
+                "minecraft:amplified": Amplified
+                "minecraft:single_biome_surface": Single biome
+              default: "minecraft:normal"
+              since: "1.19"
+            - { key: generator-settings, label: Generator settings, type: string, default: "{}", since: "1.8",
+                description: "Customises Superflat and single-biome worlds; its format depends on the world type." }
+            - { key: generate-structures, label: Generate structures, type: boolean, default: true,
+                description: "Generate structures such as villages in new chunks." }
+            - { key: max-world-size, label: Maximum world size, type: number, integer: true, min: 1, max: 29999984,
+                default: 29999984, unit: blocks, description: "The largest distance from the world centre the world border can be set to." }
+            - { key: max-build-height, label: Maximum build height, type: number, integer: true, default: 256,
+                until: "1.17", unit: blocks, description: "The highest block players can build on." }
+            - { key: initial-enabled-packs, label: Data packs enabled at creation, type: string, default: vanilla,
+                since: "1.19.3", description: "Comma-separated data packs enabled when a world is created; feature packs must be listed here." }
+            - { key: initial-disabled-packs, label: Data packs disabled at creation, type: string, default: "",
+                since: "1.19.3", description: "Comma-separated data packs not enabled automatically when a world is created." }
+            - { key: region-file-compression, label: Region file compression, type: select,
+                options: [deflate, lz4, none], labels: { deflate: Deflate, lz4: LZ4, none: None }, default: deflate,
+                since: "1.20.5", description: "How chunks are compressed on disk; chunks already saved are not recompressed." }
+            - { key: sync-chunk-writes, label: Synchronous chunk writes, type: boolean, default: true, since: "1.16",
+                description: "Write chunks to disk immediately, which prevents corruption after a crash but can slow the server on slow disks." }
+            - { key: enable-code-of-conduct, label: Code of conduct, type: boolean, default: false, since: "1.21.9",
+                description: "Show the code of conduct files in the codeofconduct folder to joining players." }
+
+        - name: Players and access
+          fields:
+            - { key: max-players, label: Maximum players, type: number, integer: true, min: 0, max: 2147483647,
+                default: 20, unit: players, description: "How many players can be online at the same time." }
+            # The game now ships with the whitelist on: a new server is closed until players are added.
+            - { key: white-list, label: Whitelist, type: boolean, default: false, until: "26.3",
+                description: "Only players on the whitelist can join." }
+            - { key: white-list, label: Whitelist, type: boolean, default: true, since: "26.3",
+                description: "Only players on the whitelist can join." }
+            - { key: enforce-whitelist, label: Enforce whitelist, type: boolean, default: false,
+                description: "Kick online players that aren't on the whitelist when it reloads." }
+            - { key: online-mode, label: Verify accounts, type: boolean, default: true,
+                description: "Only let players with a Minecraft account join; turn off only behind a trusted proxy or on a closed network." }
+            - { key: prevent-proxy-connections, label: Block proxy connections, type: boolean, default: false,
+                since: "1.11", description: "Kick players whose network differs from the one Mojang's authentication server saw." }
+            - { key: player-idle-timeout, label: Idle kick, type: number, integer: true, min: 0, default: 0, unit: minutes,
+                description: "Kick players that did nothing for this long; 0 never kicks." }
+            - { key: accepts-transfers, label: Accept transfers, type: boolean, default: false,
+                description: "Let other servers send players here with a transfer packet." }
+            - { key: enable-status, label: Show in server list, type: boolean, default: true, since: "1.16",
+                description: "Answer server list pings; when off the server looks offline but still accepts players." }
+            - { key: hide-online-players, label: Hide player list, type: boolean, default: false, since: "1.18",
+                description: "Don't send the list of online players in the server list." }
+            - { key: enable-legacy-status, label: Answer old clients, type: boolean, default: true, since: "26.4",
+                description: "Answer the server list ping of clients older than 1.7." }
+            - { key: status-contact-details, label: Contact details, type: string, default: "", since: "26.4",
+                description: "How to reach the server's owners; clients don't show it." }
+            - { key: allowed-connection-ids, label: Allowed connection ids, type: string, default: "", since: "26.4",
+                description: "Comma-separated ids; only connections whose server address starts with one of them before an @ are accepted." }
+            - { key: snooper-enabled, label: Send snooper data, type: boolean, default: true, until: "1.18",
+                description: "Send anonymous usage data to Mojang." }
+
+        - name: Chat and moderation
+          fields:
+            - { key: enforce-secure-profile, label: Require signed chat, type: boolean, default: true, since: "1.19",
+                description: "Only let players with a Mojang-signed key join; when off, chat is unsigned and can't be reported." }
+            - { key: log-ips, label: Log IP addresses, type: boolean, default: true, since: "1.20.2",
+                description: "Show players' IP addresses in the console and log." }
+            - { key: broadcast-console-to-ops, label: Show console output to operators, type: boolean, default: true,
+                description: "Send the output of console commands to online operators." }
+            - { key: broadcast-rcon-to-ops, label: Show RCON output to operators, type: boolean, default: true,
+                description: "Send the output of RCON commands to online operators." }
+            - { key: chat-spam-threshold-seconds, label: Chat spam limit, type: number, integer: true, min: 0,
+                default: 10, since: "26.2", description: "How much chat a player can send before being kicked; 0 never kicks." }
+            - { key: command-spam-threshold-seconds, label: Command spam limit, type: number, integer: true, min: 0,
+                default: 10, since: "26.2", description: "How many commands a player can send before being kicked; 0 never kicks." }
+            - { key: bug-report-link, label: Bug report link, type: string, default: "", since: "1.21",
+                description: "The address of the report_bug server link; empty sends no link." }
+
+        - name: Performance and network
+          fields:
+            - { key: view-distance, label: View distance, type: number, integer: true, min: 3, max: 32, default: 10,
+                unit: chunks, description: "How far around each player the server sends the world." }
+            - { key: simulation-distance, label: Simulation distance, type: number, integer: true, min: 3, max: 32,
+                default: 10, unit: chunks, since: "1.18", description: "How far around each player entities and blocks are updated." }
+            - { key: entity-broadcast-range-percentage, label: Entity broadcast range, type: number, integer: true,
+                min: 10, max: 1000, default: 100, unit: "%", since: "1.16",
+                description: "How close entities must be to a player to be sent, as a percentage of the normal distance." }
+            - { key: max-tick-time, label: Watchdog timeout, type: number, integer: true, min: -1, default: 60000,
+                unit: milliseconds, description: "Stop the server when a single tick takes longer; -1 turns the watchdog off." }
+            - { key: max-chained-neighbor-updates, label: Chained neighbour updates, type: number, integer: true,
+                default: 1000000, since: "1.19", description: "How many block updates in a row run before the rest are skipped; negative means no limit." }
+            - { key: network-compression-threshold, label: Compression threshold, type: number, integer: true, min: -1,
+                default: 256, unit: bytes, description: "Compress packets of at least this size; 0 compresses all, -1 none." }
+            - { key: rate-limit, label: Packet rate limit, type: number, integer: true, min: 0, default: 0,
+                unit: packets, since: "1.16.2", description: "How many packets a player can send before being kicked; 0 turns the limit off." }
+            - { key: use-native-transport, label: Native Linux networking, type: boolean, default: true,
+                description: "Use the optimised packet handling of Linux." }
+            # Paper turns pausing off by default (-1); vanilla, Forge and NeoForge pause after a minute.
+            - { key: pause-when-empty-seconds, label: Pause when empty, type: number, integer: true, default: -1,
+                unit: seconds, since: "1.21.2", when: { flavour: [paper] },
+                description: "Pause the server this long after the last player left; 0 or less never pauses." }
+            - { key: pause-when-empty-seconds, label: Pause when empty, type: number, integer: true, default: 60,
+                unit: seconds, since: "1.21.2", description: "Pause the server this long after the last player left; 0 or less never pauses." }
+
+        - name: Resource pack
+          fields:
+            - { key: resource-pack, label: Resource pack URL, type: string, default: "",
+                description: "Where players download the pack from (at most 250 MiB); empty offers none." }
+            - { key: resource-pack-sha1, label: Resource pack SHA-1, type: string, default: "",
+                pattern: "([0-9a-fA-F]{40})?", description: "The pack's SHA-1 checksum, which clients use to check the download." }
+            - { key: resource-pack-id, label: Resource pack ID, type: string, default: "",
+                pattern: "([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})?",
+                since: "1.20.3", description: "A UUID that identifies the pack to clients." }
+            - { key: resource-pack-prompt, label: Resource pack prompt, type: string, default: "", since: "1.17",
+                description: "The message shown with the pack prompt, as a chat component; empty uses the default." }
+            - { key: require-resource-pack, label: Require resource pack, type: boolean, default: false, since: "1.17",
+                description: "Disconnect players that decline the pack." }
+
 # The heap is sized from the container's memory limit, which the JVM reads from the cgroup: at most 75%, so
 # metaspace, threads and direct buffers fit in the rest instead of getting the container OOM-killed under load.
 # Every Java line from 8u191 on knows these flags; Java 8 needs the decimal point.

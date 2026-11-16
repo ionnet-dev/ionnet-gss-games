@@ -81,6 +81,43 @@ blank lines, order, line endings and every other key stay as the owner left them
 | `cfg` | literal cvar, case-insensitive | Source engine `key "value"` lines; `"` in a value becomes `'` (the engine has no escape), `;` and `//` inside the quotes are plain text |
 | `template` | none | the whole file is rendered from `template:` every time |
 
+## Game settings (`settings`)
+
+`settings` adds a Game settings tab to a server: the panel reads the config file through the file API, shows the
+declared fields that apply to this server, and writes back only the keys the owner changed (the file stays the source
+of truth; comments, order and unknown keys are kept). A child definition's `settings` replace the parent's whole block.
+
+- `version`: a template of `{{vars.<key>}}` only (`"{{vars.version}}"`), the game version `since`/`until` compare
+  against. A value that isn't a version (`latest`) counts as unknown, and the newest fields apply.
+- `version_file`: a file below `/data` whose first line is the installed version. It wins over `version` when it
+  exists; the install hook writes it, so `latest` is resolved (`minecraft-java` writes `gss-version`).
+- `files[]`: `file`, `format` (as in `configs`), `label` (section title), `others: true` (also list keys in the file no
+  applicable field declares, as text fields under "Other": keys of versions the definition doesn't know yet), `hide`
+  (keys never listed under "Other" and refused on save: container-breaking ones like `server-ip`, unpublished ports,
+  secrets) and `groups[]` (`name`, optional `description`, `fields[]`).
+- Field: `key`, `type` (`string`, `number`, `boolean`, `select`), `label`, `description`, `default` (what the game uses
+  when the key is missing: shown, not written), `options` and `labels` (`select`: the values as written in the file and
+  their display text), `min`, `max`, `integer`, `unit` (`number`), `pattern` (`string`), `since` (first version that has
+  the key, inclusive), `until` (first version that no longer has it, exclusive) and `when` (variable values, as for
+  variables).
+- A key can be declared more than once with disjoint `since`/`until`/`when`: the first field that applies wins (numeric
+  `difficulty` before 1.14, names since). Keys `configs.set` manages in the same file can't be declared.
+
+```yaml
+settings:
+  version: "{{vars.version}}"
+  version_file: gss-version
+  files:
+    - file: server.properties
+      format: properties
+      others: true
+      groups:
+        - name: Performance and network
+          fields:
+            - { key: view-distance, label: View distance, type: number, integer: true, min: 3, max: 32, default: 10, unit: chunks }
+            - { key: pause-when-empty-seconds, type: number, integer: true, default: 60, since: "1.21.2" }
+```
+
 ## Packages and services
 
 - `packages: [name, …]` (Debian names, not ending in `-`, `:i386` allowed, at most 50): the agent builds a derived image from `image` once
