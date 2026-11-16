@@ -104,17 +104,48 @@ configs:
       rcon.port: "{{ports.rcon}}"
       rcon.password: "{{vars.rcon_password}}"
 
+# The installed Minecraft version, for the Game settings fields and the mod catalogs. gss-version is written by the
+# install hook (the concrete version, not "latest"); until it exists the version variable decides.
+game_version:
+  value: "{{vars.version}}"
+  file: gss-version
+
+# The Mods tab. Forge and NeoForge load every .jar directly in mods/, Paper every .jar in plugins/; disabling moves a
+# jar to mods.disabled/ or plugins.disabled/, which the game never reads. CurseForge is offered first and needs the
+# operator's API key (Settings → Mod catalogs); Modrinth needs none. Both use the flavour values as loader names
+# (CurseForge maps them to its loader types), and Paper also runs Spigot and Bukkit plugins. Packs may write configs
+# and scripts next to the mods, never the server's own files. Vanilla has neither folder.
+mods:
+  - key: mods
+    label: Mods
+    description: Forge or NeoForge mods. Players need the same mods on their client, except server-side-only ones.
+    folder: mods
+    match: ["*.jar"]
+    when: { flavour: [forge, neoforge] }
+    catalogs:
+      - { provider: curseforge, game_id: 432, project_type: mc-mods, loaders: ["{{vars.flavour}}"] }
+      - { provider: modrinth, project_type: mod, loaders: ["{{vars.flavour}}"] }
+    packs:
+      formats: [curseforge, mrpack, zip]
+      overrides: [config, defaultconfigs, kubejs, scripts, global_packs, datapacks, resourcepacks, paxi]
+  - key: plugins
+    label: Plugins
+    description: Paper, Spigot and Bukkit plugins. Players don't need anything on their client.
+    folder: plugins
+    match: ["*.jar"]
+    when: { flavour: [paper] }
+    catalogs:
+      - { provider: curseforge, game_id: 432, project_type: bukkit-plugins }
+      - { provider: modrinth, project_type: plugin, loaders: [paper, spigot, bukkit] }
+
 # The Game settings tab: the panel reads server.properties through the file API, shows the fields that apply to the
-# server's Minecraft version (since is inclusive, until exclusive) and writes back only the keys the owner changed.
-# gss-version is written by the install hook (the concrete version, not "latest"); until it exists the version
-# variable decides. Keys configs.set manages above (server-port, motd, rcon) and keys that make no sense inside the
+# server's Minecraft version (game_version above; since is inclusive, until exclusive) and writes back only the keys
+# the owner changed. Keys configs.set manages above (server-port, motd, rcon) and keys that make no sense inside the
 # container (server-ip, the query, management-server and JMX ports, which aren't published) are left out, and `hide`
 # keeps them out of the "Other" group too (the management server's secret would show in plain text). A key that
 # changed its format over time appears twice with disjoint version ranges. Version limits come from the Minecraft
 # Wiki's server.properties history; a key without one has no documented start.
 settings:
-  version: "{{vars.version}}"
-  version_file: gss-version
   files:
     - file: server.properties
       format: properties

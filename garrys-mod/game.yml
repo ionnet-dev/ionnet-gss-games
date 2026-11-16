@@ -35,6 +35,16 @@ configs:
       rcon_password: "{{vars.rcon_password}}"
       sv_lan: "0"
 
+# The Mods tab: Garry's Mod mounts every folder and .gma file in garrysmod/addons/ at start. Disabling moves one to
+# garrysmod/addons.disabled/, which it never reads. No catalog yet (the Steam Workshop needs steamcmd on the host side);
+# Workshop content still comes in through the collection variable.
+mods:
+  - key: addons
+    label: Addons
+    description: Folders and .gma files the server mounts. Addons from the Workshop collection aren't listed here.
+    folder: garrysmod/addons
+    match: ["*/", "*.gma"]
+
 # Every user-written value goes through |sh. The Workshop collection and the API key are only passed when set: the
 # shell variables are empty otherwise and ${VAR:+…} then expands to nothing. srcds_run's own restart loop is off
 # (-norestart) so gss-init decides about restarts.

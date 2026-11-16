@@ -87,10 +87,9 @@ blank lines, order, line endings and every other key stay as the owner left them
 declared fields that apply to this server, and writes back only the keys the owner changed (the file stays the source
 of truth; comments, order and unknown keys are kept). A child definition's `settings` replace the parent's whole block.
 
-- `version`: a template of `{{vars.<key>}}` only (`"{{vars.version}}"`), the game version `since`/`until` compare
-  against. A value that isn't a version (`latest`) counts as unknown, and the newest fields apply.
-- `version_file`: a file below `/data` whose first line is the installed version. It wins over `version` when it
-  exists; the install hook writes it, so `latest` is resolved (`minecraft-java` writes `gss-version`).
+- The game version `since`/`until` compare against comes from `game_version` (below). Unknown (`latest` before the
+  first install): the newest fields apply. `version` and `version_file` inside `settings` are the older spelling,
+  used only without `game_version`.
 - `files[]`: `file`, `format` (as in `configs`), `label` (section title), `others: true` (also list keys in the file no
   applicable field declares, as text fields under "Other": keys of versions the definition doesn't know yet), `hide`
   (keys never listed under "Other" and refused on save: container-breaking ones like `server-ip`, unpublished ports,
@@ -105,8 +104,6 @@ of truth; comments, order and unknown keys are kept). A child definition's `sett
 
 ```yaml
 settings:
-  version: "{{vars.version}}"
-  version_file: gss-version
   files:
     - file: server.properties
       format: properties
@@ -116,6 +113,69 @@ settings:
           fields:
             - { key: view-distance, label: View distance, type: number, integer: true, min: 3, max: 32, default: 10, unit: chunks }
             - { key: pause-when-empty-seconds, type: number, integer: true, default: 60, since: "1.21.2" }
+```
+
+## Game version (`game_version`)
+
+Where the panel learns which game version is installed, for the Game settings fields and the mod catalogs:
+
+- `file`: a file below `/data` whose first line is the installed version. The install hook writes it, so `latest` is
+  resolved (`minecraft-java` writes `gss-version`). It wins when it holds a version.
+- `value`: a template of `{{vars.<key>}}` only (`"{{vars.version}}"`), used until the file exists. A value that isn't a
+  version (`latest`) counts as unknown.
+
+Versions compare by their numeric parts: `1.21.4 < 26.1`, `1.21 == 1.21.0`.
+
+```yaml
+game_version:
+  value: "{{vars.version}}"
+  file: gss-version
+```
+
+## Mods (`mods`)
+
+`mods` adds a Mods tab to a server: a list of folders whose entries are mods. The panel lists them, takes uploads by
+drag and drop, disables a mod by moving it to a second folder the game doesn't read (and back), deletes them, and can
+install from a catalog with the required dependencies. All of it goes through the file API, so it works for any game
+that loads mods from a folder. What the panel installed from a catalog is recorded in `gss-mods.json` at the data root
+(title, version, where it came from); entries put there any other way are listed by name.
+
+- `key`: unique in the definition (`mods`, `plugins`, `addons`); folders merge by key with `extends`.
+- `label`, `description`: the section title and a sentence under it.
+- `folder`: below `/data` (`mods`, `garrysmod/addons`). Created on the first upload or install.
+- `disabled_folder`: where disabled mods go. Default `<folder>.disabled`; never inside `folder`.
+- `match`: the entry names that count as mods, one path segment each: `*` and `?` match within the name, a trailing
+  `/` matches folders only (`["*.jar"]`, `["*/", "*.gma"]`). Other entries are left alone. Uploads must match a file
+  pattern; folders can't be uploaded yet.
+- `when`: only for some variable values (`{ flavour: [forge, neoforge] }`), as for variables.
+- `catalogs`: where mods can be searched and installed from, in the order the tab offers them. Each has `provider`
+  (`curseforge` or `modrinth`), `project_type` (the provider's kind: Modrinth `mod`, `plugin`…; CurseForge the class
+  slug `mc-mods`, `bukkit-plugins`…), `loaders` (loader names this server runs, templates allowed:
+  `["{{vars.flavour}}"]`; CurseForge maps `forge`, `neoforge`, `fabric`, `quilt` to its types; empty = any) and, for
+  CurseForge, `game_id` (432 = Minecraft). The panel filters by these and the installed `game_version`, hides
+  client-only mods where the catalog knows, checks every download's hash, offers updates, and fetches only from hosts
+  on its `MOD_CATALOG_HOSTS`. CurseForge needs the operator's own API key (Settings → Mod catalogs); without one it is
+  shown as unavailable.
+- `packs`: importing a modpack into the folder. `formats`: `curseforge` (a CurseForge profile or modpack export, its
+  `manifest.json` alone or in the zip), `mrpack` (Modrinth) and `zip` (any zip of mod files, e.g. a server pack).
+  `overrides`: the top-level folders the pack may also write files into (`[config, defaultconfigs, kubejs]`);
+  everything else in the pack is skipped and listed. The import shows a preview first. CurseForge files are downloaded
+  with the operator's key; without one the preview links each mod so the owner can download it and drop it in.
+
+```yaml
+mods:
+  - key: mods
+    label: Mods
+    folder: mods
+    match: ["*.jar"]
+    when: { flavour: [forge, neoforge] }
+    catalogs:
+      - { provider: curseforge, game_id: 432, project_type: mc-mods, loaders: ["{{vars.flavour}}"] }
+      - { provider: modrinth, project_type: mod, loaders: ["{{vars.flavour}}"] }
+    packs: { formats: [curseforge, mrpack, zip], overrides: [config, defaultconfigs, kubejs] }
+  - key: addons            # Garry's Mod: folders and .gma files, no catalog
+    folder: garrysmod/addons
+    match: ["*/", "*.gma"]
 ```
 
 ## Packages and services
