@@ -13,6 +13,34 @@ One folder per game: `<id>/game.yml` plus any files it references (`hooks/*.sh`,
 the version of the definition it was created with until its owner upgrades it. In the panel's own repository this
 repository is the `games` folder, which a development panel loads as its built-in source (`GAMES_DIR`).
 
+## Images
+
+A game runs in an image from `ghcr.io/ionnet-dev`. A bare `image: ionnet-gss-<name>[:tag]` in game.yml gets the
+panel's `IMAGE_REGISTRY` in front (`ionnet-gss-minecraft-server:java21` →
+`ghcr.io/ionnet-dev/ionnet-gss-minecraft-server:java21`); any other reference (`mariadb:11.4`) is used as written.
+
+- `ionnet-gss-base` (Debian with `gss-init`, which every game image needs) is built and published by the panel's
+  repository, because it compiles `gss-init` from the agent's code.
+- A game that needs more than the base keeps its image here, next to its game.yml: `<game>/image/Dockerfile`
+  (`FROM ${BASE}`, default `ghcr.io/ionnet-dev/ionnet-gss-base:latest`) and `<game>/image/image.yml`, which names the
+  image and its tags:
+
+  ```yaml
+  name: ionnet-gss-minecraft-server
+  variants:
+    - tag: java21
+      args: { JAVA: "21" } # Build args for the Dockerfile.
+  ```
+
+  `.github/workflows/images.yml` builds every variant for linux/amd64 and pushes it: on a push that changes an
+  `image/` folder (only those games), every Monday (all games, so they pick up a new base image and OS or runtime
+  updates) and on demand (Actions → Images → Run workflow, optionally one game). It keeps no artifacts or build cache
+  and deletes each image's untagged versions afterwards, so the registry holds only the current tags.
+- Hosts pull an image when a server installs or reinstalls, so a rebuilt tag reaches a server at its next
+  (re)install; running servers keep the image they have until then.
+- A new image's package on GHCR starts private: make it public once (package settings → Change visibility) so hosts
+  can pull it without logging in.
+
 ## Format
 
 - Hooks run inside the container as uid 1000 in `/data`, with `GSS_VAR_<KEY>`, `GSS_PORT_<NAME>` and `GSS_SERVER_ID`

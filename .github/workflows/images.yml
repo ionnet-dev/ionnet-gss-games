@@ -1,0 +1,122 @@
+# Builds and publishes the game images: every <game>/image/image.yml names an image and its variants, built from the
+# Dockerfile beside it and pushed as ghcr.io/ionnet-dev/<name>:<tag> (linux/amd64).
+# Storage is kept small on purpose: no workflow artifacts, no build cache, no provenance/SBOM attestations, and
+# every package's untagged versions (the images a tag pointed at before) are deleted after each run.
+name: Images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "*/image/**"
+      - ".github/workflows/images.yml"
+  schedule:
+    - cron: "17 4 * * 1" # Mondays: picks up a new ionnet-gss-base and JRE/OS updates.
+  workflow_dispatch:
+    inputs:
+      game:
+        description: Game folder to build (empty = every game with an image)
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: images
+  cancel-in-progress: false # Never stop halfway through publishing.
+
+env:
+  REGISTRY: ghcr.io/ionnet-dev
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      builds: ${{ steps.plan.outputs.builds }}
+      names: ${{ steps.plan.outputs.names }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: plan
+        name: List the images to build
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          GAME: ${{ github.event.inputs.game }}
+        run: |
+          set -euo pipefail
+          # Which game folders to build: one on request, those whose image/ changed on a push, else all.
+          ALL="$(for FILE in ./*/image/image.yml; do [[ -f "$FILE" ]] && echo "$FILE"; done | cut -d / -f 2 | sort -u)"
+          if [[ "$EVENT" == "workflow_dispatch" && -n "$GAME" ]]; then
+            [[ -f "$GAME/image/image.yml" ]] || { echo "::error::$GAME has no image/image.yml"; exit 1; }
+            GAMES="$GAME"
+          elif [[ "$EVENT" == "push" && -n "$BEFORE" && ! "$BEFORE" =~ ^0+$ ]] && CHANGED="$(git diff --name-only "$BEFORE" "$GITHUB_SHA")"; then
+            if grep -qx ".github/workflows/images.yml" <<< "$CHANGED"; then
+              GAMES="$ALL"
+            else
+              GAMES="$(grep -E '^[^/]+/image/' <<< "$CHANGED" | cut -d / -f 1 | sort -u | while read -r DIR; do [[ -f "$DIR/image/image.yml" ]] && echo "$DIR"; done || true)"
+            fi
+          else
+            GAMES="$ALL"
+          fi
+          # One build per variant: { dir, name, tag, args } with args as KEY=value lines.
+          BUILDS="[]"
+          for DIR in $GAMES; do
+            # shellcheck disable=SC2016 # The single quotes hold a yq expression, not shell.
+            BUILDS="$(yq -o=json '[.name as $name | .variants[] | {"name": $name, "tag": .tag, "args": ((.args // {}) | to_entries | map(.key + "=" + (.value | tostring)) | join("\n"))}]' "$DIR/image/image.yml" \
+              | jq -c --arg dir "$DIR" --argjson builds "$BUILDS" '$builds + map(. + {dir: $dir})')"
+          done
+          echo "builds=$BUILDS" >> "$GITHUB_OUTPUT"
+          echo "names=$(jq -c '[.[].name] | unique' <<< "$BUILDS")" >> "$GITHUB_OUTPUT"
+          echo "Planned: $(jq -r 'map(.name + ":" + .tag) | join(", ")' <<< "$BUILDS")"
+
+  build:
+    needs: plan
+    if: needs.plan.outputs.builds != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.builds) }}
+    name: ${{ matrix.name }}:${{ matrix.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.dir }}/image
+          platforms: linux/amd64
+          build-args: ${{ matrix.args }}
+          tags: ${{ env.REGISTRY }}/${{ matrix.name }}:${{ matrix.tag }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          pull: true # Always build on the newest base and JRE images.
+          push: true
+          provenance: false
+          sbom: false
+
+  cleanup:
+    needs: [plan, build]
+    if: ${{ !cancelled() && needs.plan.outputs.names != '[]' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        name: ${{ fromJSON(needs.plan.outputs.names) }}
+    steps:
+      - name: Delete untagged versions of ${{ matrix.name }}
+        uses: actions/delete-package-versions@v5
+        with:
+          package-name: ${{ matrix.name }}
+          package-type: container
+          delete-only-untagged-versions: "true"
+          min-versions-to-keep: 0

@@ -1,0 +1,12 @@
+# The image this game runs, built from the Dockerfile beside this file by .github/workflows/images.yml and published
+# as ghcr.io/ionnet-dev/<name>:<tag>, one tag per variant (build args passed to the Dockerfile).
+name: ionnet-gss-minecraft-server
+variants:
+  - tag: java8
+    args: { JAVA: "8" }
+  - tag: java17
+    args: { JAVA: "17" }
+  - tag: java21
+    args: { JAVA: "21" }
+  - tag: java25
+    args: { JAVA: "25" }
