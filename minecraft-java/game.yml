@@ -1,4 +1,5 @@
-# Minecraft: Java Edition (vanilla or Paper). The install hook resolves "latest" and verifies the jar's checksum.
+# Minecraft: Java Edition (vanilla, Paper, Forge or NeoForge). The install hook resolves "latest" and "recommended",
+# verifies every download's checksum and writes gss-launch.args, the arguments `start` passes to java.
 id: minecraft-java
 name: "Minecraft: Java Edition"
 image: ionnet-gss-minecraft-server:java{{vars.java}}
@@ -7,7 +8,8 @@ variables:
   - key: flavour
     label: Server software
     type: select
-    options: [vanilla, paper]
+    description: Forge and NeoForge run mods; Paper runs plugins.
+    options: [vanilla, paper, forge, neoforge]
     default: paper
     reinstall: true
   - key: version
@@ -24,10 +26,44 @@ variables:
     pattern: '[0-9]+\.[0-9]+(\.[0-9]+)?'
     default: latest
     reinstall: true
+  # The loader lists follow the chosen Minecraft version: the form refetches them when it changes. Forge's own maven
+  # lists every build as <minecraft>-<forge>, oldest first. NeoForge's maven has no Minecraft mapping (21.1.x is
+  # 1.21.1, 26.1.0.x is 26.1, 1.20.1 is another artifact), so its list is Prism Launcher's index of the same maven,
+  # which records each build's Minecraft version; the hook still downloads from NeoForge.
+  - key: forge_version
+    label: Forge version
+    description: '"recommended" picks the build Forge recommends for this Minecraft version, or its newest one.'
+    type: select
+    options: [recommended]
+    options_from:
+      url: https://maven.minecraftforge.net/api/maven/versions/releases/net/minecraftforge/forge
+      items: versions
+      include: '^{{vars.version}}-'
+      reverse: true
+      limit: 300
+    pattern: '[0-9][0-9A-Za-z._-]*'
+    default: recommended
+    when: { flavour: [forge] }
+    reinstall: true
+  - key: neoforge_version
+    label: NeoForge version
+    description: '"recommended" picks the newest stable NeoForge build for this Minecraft version (or its newest beta).'
+    type: select
+    options: [recommended]
+    options_from:
+      url: https://meta.prismlauncher.org/v1/net.neoforged/index.json
+      items: versions
+      value: version
+      where: { requires.0.equals: '{{vars.version}}' }
+      limit: 300
+    pattern: '[0-9][0-9A-Za-z._+-]*'
+    default: recommended
+    when: { flavour: [neoforge] }
+    reinstall: true
   - key: java
     label: Java
     type: select
-    description: The newest releases need Java 25, 1.20.5 to 1.21.x need 21, older ones 17 or 8.
+    description: The newest releases need Java 25, 1.20.5 to 1.21.x need 21, 1.17 to 1.20.4 need 17 (Forge and NeoForge too), 1.16 and older 8.
     options: ["8", "17", "21", "25"]
     default: "25"
     reinstall: false
@@ -72,16 +108,20 @@ configs:
 # metaspace, threads and direct buffers fit in the rest instead of getting the container OOM-killed under load.
 # Every Java line from 8u191 on knows these flags; Java 8 needs the decimal point.
 # terminal.jline=false stops Paper's line editor from echoing typed commands back into the console.
-start: java -XX:InitialRAMPercentage=25.0 -XX:MaxRAMPercentage=75.0 -Dterminal.jline=false -Dterminal.ansi=true -jar server.jar nogui
+# gss-launch.args holds "-jar server.jar" (vanilla, Paper), Forge's or NeoForge's argument file (@libraries/…/unix_args.txt)
+# or old Forge's jar. Servers installed before it existed have only server.jar.
+start: java -XX:InitialRAMPercentage=25.0 -XX:MaxRAMPercentage=75.0 -Dterminal.jline=false -Dterminal.ansi=true $(cat gss-launch.args 2>/dev/null || echo -jar server.jar) nogui
 ready: { log: 'Done \(\d' }
 stop: { command: stop, timeout: 60 }
 
 console: { input: stdin }
 players:
   # Anchored at the line start (only the log prefix may come before the name) and at the line end, so chat and
-  # /say lines can't fake a join. Matches vanilla "[12:00:00] [Server thread/INFO]: ", Paper "[12:00:00 INFO]: " and recent Paper, which logs "System chat: Steve joined the game".
-  join: '^(?:\[[^\]]*\] )*\[[^\]]*INFO\]: (?:System chat: )?(\w+) joined the game\s*$'
-  leave: '^(?:\[[^\]]*\] )*\[[^\]]*INFO\]: (?:System chat: )?(\w+) left the game\s*$'
+  # /say lines can't fake a join. Matches vanilla "[12:00:00] [Server thread/INFO]: ", Paper "[12:00:00 INFO]: ",
+  # Forge and NeoForge "[12:00:00] [Server thread/INFO] [minecraft/MinecraftServer]: " and recent Paper, which logs
+  # "System chat: Steve joined the game".
+  join: '^(?:\[[^\]]*\] )*\[[^\]]*INFO\](?: \[[^\]]*\])?: (?:System chat: )?(\w+) joined the game\s*$'
+  leave: '^(?:\[[^\]]*\] )*\[[^\]]*INFO\](?: \[[^\]]*\])?: (?:System chat: )?(\w+) left the game\s*$'
 
 backup:
   before: [save-off, save-all flush]

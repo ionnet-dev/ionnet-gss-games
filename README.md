@@ -5,7 +5,7 @@ this repository as a source (Manage → Sources) and offers every game in it:
 
 | Game | Folder |
 | --- | --- |
-| Minecraft: Java Edition | `minecraft-java` |
+| Minecraft: Java Edition (vanilla, Paper, Forge, NeoForge) | `minecraft-java` |
 | Garry's Mod | `garrys-mod` |
 | Garry's Mod with a MariaDB database beside it | `garrys-mod-mysql` |
 
@@ -66,6 +66,29 @@ A `select` variable can take its choices from a JSON document: `options_from: { 
 reverse, limit }` (see `minecraft-java`'s `version`). The panel fetches it (https, hosts on `OPTIONS_FETCH_HOSTS`, at
 most 2 MiB, cached), puts the static `options` first, and checks submitted values against the list. When the list
 can't be fetched the form becomes free text, so give the variable a `pattern` the value must then match.
+
+A list can depend on other variables: `{{vars.<key>}}` (no filters) may appear in `url` after the host (URL-encoded),
+in `where` values and in `include` (matched as literal text). The form sends their current values and fetches the
+list again when they change; a picked value the new list no longer offers moves to the list's first choice. See
+`minecraft-java`'s `forge_version` (`include: '^{{vars.version}}-'`) and `neoforge_version`
+(`where: { requires.0.equals: '{{vars.version}}' }`). A list can't depend on a secret, on itself, or in a circle.
+
+## Showing a variable only sometimes (`when`)
+
+`when: { flavour: [forge] }` shows a variable only while `flavour` is `forge` (several keys must all match; booleans
+are written `"true"` / `"false"`). A hidden variable keeps its value (its default, at create) and a hidden select isn't
+checked against its `options_from` list, so a hook still gets it: check the flavour before using it.
+
+## Minecraft loaders
+
+The install hook writes `gss-launch.args`, which `start` passes to java after the memory flags: `-jar server.jar`
+(vanilla, Paper), `@libraries/…/unix_args.txt` (Forge 1.17+ and NeoForge, from their installer) or
+`-jar forge-<version>.jar` (older Forge). The Forge list comes from Forge's maven, the NeoForge list from Prism
+Launcher's index (NeoForge's maven doesn't say which Minecraft version a build is for); both installers are downloaded
+from the official mavens and checked against their `.sha256`. `recommended` is Forge's recommended build (else its
+newest), or NeoForge's newest stable build (else its newest beta). With Minecraft `latest`, the hook falls back to the
+loader's newest Minecraft version when it doesn't support the newest release yet. The panel's `OPTIONS_FETCH_HOSTS`
+needs `maven.minecraftforge.net` and `meta.prismlauncher.org` (in the default list).
 
 ## Patterns
 
