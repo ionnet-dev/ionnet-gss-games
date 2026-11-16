@@ -1,7 +1,11 @@
 # Builds and publishes the game images: every <game>/image/image.yml names an image and its variants, built from the
 # Dockerfile beside it and pushed as ghcr.io/ionnet-dev/<name>:<tag> (linux/amd64).
+# A variant is only rebuilt when its inputs changed (.github/scripts/image-inputs.sh): the files in image/, its build
+# args, or the exact image behind one of its FROM lines (a new ionnet-gss-base, a republished JRE). Each image carries
+# its inputs as labels, and the plan compares against the published image's labels. A rebuild nobody needs would make
+# every host download the image again and recreate the server's container at its next install.
 # Storage is kept small on purpose: no workflow artifacts, no build cache, no provenance/SBOM attestations, and
-# every package's untagged versions (the images a tag pointed at before) are deleted after each run.
+# every package's untagged versions (the images a tag pointed at before) are deleted after each run that built.
 name: Images
 
 on:
@@ -9,15 +13,20 @@ on:
     branches: [main]
     paths:
       - "*/image/**"
+      - ".github/scripts/**"
       - ".github/workflows/images.yml"
   schedule:
-    - cron: "17 4 * * 1" # Mondays: picks up a new ionnet-gss-base and JRE/OS updates.
+    - cron: "17 4 * * *" # Daily, after the base image's check: picks up a new ionnet-gss-base or JRE. Seconds when nothing changed.
   workflow_dispatch:
     inputs:
       game:
-        description: Game folder to build (empty = every game with an image)
+        description: Game folder to check (empty = every game with an image)
         required: false
         default: ""
+      force:
+        description: Build even when the inputs are unchanged
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -38,40 +47,12 @@ jobs:
       names: ${{ steps.plan.outputs.names }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - id: plan
-        name: List the images to build
+        name: Check which images have new inputs
         env:
-          EVENT: ${{ github.event_name }}
-          BEFORE: ${{ github.event.before }}
           GAME: ${{ github.event.inputs.game }}
-        run: |
-          set -euo pipefail
-          # Which game folders to build: one on request, those whose image/ changed on a push, else all.
-          ALL="$(for FILE in ./*/image/image.yml; do [[ -f "$FILE" ]] && echo "$FILE"; done | cut -d / -f 2 | sort -u)"
-          if [[ "$EVENT" == "workflow_dispatch" && -n "$GAME" ]]; then
-            [[ -f "$GAME/image/image.yml" ]] || { echo "::error::$GAME has no image/image.yml"; exit 1; }
-            GAMES="$GAME"
-          elif [[ "$EVENT" == "push" && -n "$BEFORE" && ! "$BEFORE" =~ ^0+$ ]] && CHANGED="$(git diff --name-only "$BEFORE" "$GITHUB_SHA")"; then
-            if grep -qx ".github/workflows/images.yml" <<< "$CHANGED"; then
-              GAMES="$ALL"
-            else
-              GAMES="$(grep -E '^[^/]+/image/' <<< "$CHANGED" | cut -d / -f 1 | sort -u | while read -r DIR; do [[ -f "$DIR/image/image.yml" ]] && echo "$DIR"; done || true)"
-            fi
-          else
-            GAMES="$ALL"
-          fi
-          # One build per variant: { dir, name, tag, args } with args as KEY=value lines.
-          BUILDS="[]"
-          for DIR in $GAMES; do
-            # shellcheck disable=SC2016 # The single quotes hold a yq expression, not shell.
-            BUILDS="$(yq -o=json '[.name as $name | .variants[] | {"name": $name, "tag": .tag, "args": ((.args // {}) | to_entries | map(.key + "=" + (.value | tostring)) | join("\n"))}]' "$DIR/image/image.yml" \
-              | jq -c --arg dir "$DIR" --argjson builds "$BUILDS" '$builds + map(. + {dir: $dir})')"
-          done
-          echo "builds=$BUILDS" >> "$GITHUB_OUTPUT"
-          echo "names=$(jq -c '[.[].name] | unique' <<< "$BUILDS")" >> "$GITHUB_OUTPUT"
-          echo "Planned: $(jq -r 'map(.name + ":" + .tag) | join(", ")' <<< "$BUILDS")"
+          FORCE: ${{ github.event.inputs.force }}
+        run: .github/scripts/plan-images.sh
 
   build:
     needs: plan
@@ -99,14 +80,15 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-          pull: true # Always build on the newest base and JRE images.
+            ${{ matrix.labels }}
+          pull: true # Build on the base and JRE images the plan just checked.
           push: true
           provenance: false
           sbom: false
 
   cleanup:
     needs: [plan, build]
-    if: ${{ !cancelled() && needs.plan.outputs.names != '[]' }}
+    if: ${{ !cancelled() && needs.plan.outputs.names != '[]' }} # Only images this run built.
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false

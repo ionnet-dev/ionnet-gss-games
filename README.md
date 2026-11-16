@@ -32,10 +32,18 @@ panel's `IMAGE_REGISTRY` in front (`ionnet-gss-minecraft-server:java21` →
       args: { JAVA: "21" } # Build args for the Dockerfile.
   ```
 
-  `.github/workflows/images.yml` builds every variant for linux/amd64 and pushes it: on a push that changes an
-  `image/` folder (only those games), every Monday (all games, so they pick up a new base image and OS or runtime
-  updates) and on demand (Actions → Images → Run workflow, optionally one game). It keeps no artifacts or build cache
-  and deletes each image's untagged versions afterwards, so the registry holds only the current tags.
+  `.github/workflows/images.yml` builds a variant for linux/amd64 and pushes it **only when its inputs changed**: the
+  files in `image/` (other than image.yml), the variant's build args, or the exact image behind one of the
+  Dockerfile's `FROM` lines (a new `ionnet-gss-base`, a republished JRE). Every image carries its inputs as
+  `dev.ionnet.gss.inputs*` labels; the workflow compares them with the published image's labels
+  (`.github/scripts/image-inputs.sh`) and logs per tag `unchanged (inputs …), skipped` or what changed. It checks on
+  every push that touches an `image/` folder or the scripts, daily, and on demand (Actions → Images → Run workflow,
+  optionally one game, and **force** to build even when nothing changed). A check with nothing to build takes
+  seconds. Packages installed in the build (`apt`) are not an input of their own: they arrive when the image they
+  come from is republished, or with a forced build. Unneeded rebuilds are avoided on purpose, because every rebuilt
+  tag is downloaded again by each host and recreates the server's container at its next install. The workflow keeps
+  no artifacts or build cache and deletes each built image's untagged versions afterwards, so the registry holds only
+  the current tags.
 - Hosts pull an image when a server installs or reinstalls, so a rebuilt tag reaches a server at its next
   (re)install; running servers keep the image they have until then.
 - A new image's package on GHCR starts private: make it public once (package settings → Change visibility) so hosts
